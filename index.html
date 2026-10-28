@@ -129,11 +129,30 @@ body{display:flex;justify-content:center;min-height:100%;min-height:100dvh;
 .settle-badge.n{background:var(--no-dim);color:var(--no)}
 .hidden{display:none !important}
 .footer-note{font-size:10px;color:var(--dim);padding:8px 4px 20px;text-align:center;line-height:1.45}
+
+.acct{position:sticky;top:0;z-index:35;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:6px 10px;background:rgba(14,15,20,.97);border-bottom:1px solid var(--border)}
+.acct button{background:#1a1c24;border:1px solid var(--border);border-radius:8px;padding:5px 4px;color:#fff;cursor:pointer;text-align:center}
+.acct .l{font-size:9px;letter-spacing:.06em;color:var(--dim);font-weight:700}
+.acct .v{font-size:14px;font-weight:800}
+.acct .pend .v{color:#ffcc66}
+.subnav{display:flex;gap:4px;margin:2px 0 8px}
+.subnav button{flex:1;background:#1a1c24;border:1px solid var(--border);color:var(--dim);font-size:11px;font-weight:700;padding:8px 2px;border-radius:8px;cursor:pointer}
+.subnav button.on{color:var(--accent);border-color:var(--accent)}
+.crumb{font-size:11px;color:var(--dim);margin-bottom:6px}.crumb a{color:var(--accent);cursor:pointer}
+table.tk{width:100%;border-collapse:collapse;font-size:12px}
+.tk th{font-size:10px;color:var(--dim);text-align:left;padding:5px 4px;border-bottom:1px solid var(--border)}
+.tk td{padding:6px 4px;vertical-align:top}.tk td.n,.tk th.n{text-align:right;white-space:nowrap}
+.tk tr.r:nth-of-type(4n+1){background:rgba(255,255,255,.035)}
+.tk tr.r{cursor:pointer}.tk tr.x td{background:#12141b;font-size:11px;color:var(--muted);line-height:1.5}
+.tk tfoot td{font-weight:800;border-top:1px solid var(--border);padding:7px 4px}
+.sy{color:#4ade80;font-weight:700}.sn{color:#f87171;font-weight:700}
+.st{font-size:9px;font-weight:800;padding:1px 5px;border-radius:4px}.st.P{background:#3d2a00;color:#ffcc66}.st.W{background:#123a22;color:#4ade80}.st.L{background:#3a1515;color:#f87171}
 </style>
 </head>
 <body>
 <div class="app" id="app">
   <div class="banner">⚠ MOCK / DEMO — NOT REAL MONEY · GTWMG25 Polymarket-style book · 8% house rake</div>
+  <div class="acct" id="acct"></div>
   <div class="header">
     <h1 id="hdr-title">Winter Member-Guest</h1>
     <div class="sub" id="hdr-sub">2025 Green Tree · flight winners + props</div>
@@ -144,6 +163,7 @@ body{display:flex;justify-content:center;min-height:100%;min-height:100dvh;
   <div id="view-props" class="main hidden"></div>
   <div id="view-feed" class="main hidden"></div>
   <div id="view-settle" class="main hidden"></div>
+  <div id="view-tickets" class="main hidden"></div>
 
   <div class="toast" id="toast"></div>
   <nav class="nav">
@@ -205,7 +225,7 @@ function chg(t){
 function setView(v){
   view = v;
   $$('.nav button').forEach(b=>b.classList.toggle('on', b.dataset.view===v));
-  ['home','flight','props','feed','settle'].forEach(id=>{
+  ['home','flight','props','feed','settle','tickets'].forEach(id=>{
     const el = $('#view-'+id);
     if(el) el.classList.toggle('hidden', id!==v);
   });
@@ -215,6 +235,8 @@ function setView(v){
   if(v==='props') renderProps();
   if(v==='feed') renderFeed();
   if(v==='settle') renderSettle();
+  if(v==='tickets') renderTickets();
+  renderAcct();
   window.scrollTo(0,0);
 }
 
@@ -424,7 +446,7 @@ $('.nav').innerHTML = `
   <button class="on" data-view="home"><span>⌂</span>HOME</button>
   <button data-view="flight"><span>✈</span>FLIGHTS</button>
   <button data-view="props"><span>✦</span>PROPS</button>
-  <button data-view="feed"><span>↻</span>FEED</button>
+  <button data-view="tickets"><span>☰</span>TICKETS</button>
 `;
 // floating settle? Add to nav by making 5 — cramped. Settle reachable from home CTA + banner tap.
 $('.banner').style.cursor = 'pointer';
@@ -433,12 +455,66 @@ $('.banner').addEventListener('click', ()=>setView('settle'));
 $$('.nav button').forEach(b=>b.addEventListener('click', ()=>setView(b.dataset.view)));
 
 
+
+// ===== LuckySP-style Tickets: Balance|Pending|Available, Figures|Pending|Transactions =====
+let tkTab='pending', tkOpen=null, figDrill=null;
+const BANKROLL=5000;
+const HOLES=[0,3,6,9,12,15,18];
+function hl(h){return h===0?'OPEN':'H'+h;}
+function liveHole(){return priceMode==='open'?0:priceMode==='live'?12:18;}
+function placed(){return DATA.trades.filter(t=>t.hole<=liveHole());}
+function yesWins(t){ if(t.kind==='flight') return DATA.winners[t.flight]===t.market;
+  const p=DATA.props.find(p=>p.title===t.market||p.id===t.market); return p?!!p.settle_yes:false; }
+function status(t){ if(priceMode!=='final') return 'P'; return ((t.side==='Yes')===yesWins(t))?'W':'L'; }
+function toWin(t){ return t.shares; } // payout if side wins ($1/share)
+function tkPnl(t){ const s=status(t); return s==='W'?t.shares-t.stake:s==='L'?-t.stake:0; }
+function acctNums(){ const tr=placed(); const rake=tr.reduce((a,t)=>a+t.rake,0);
+  const pend=tr.filter(t=>status(t)==='P').reduce((a,t)=>a+t.stake,0);
+  const bal=BANKROLL+rake; return {bal,pend,avail:bal-pend}; }
+function renderAcct(){ const n=acctNums();
+  $('#acct').innerHTML=`<button onclick="tkTab='figures';setView('tickets')"><div class="l">BALANCE</div><div class="v">${money(n.bal)}</div></button>
+  <button class="pend" onclick="tkTab='pending';tkOpen=null;setView('tickets')"><div class="l">PENDING</div><div class="v">${money(n.pend)}</div></button>
+  <button onclick="tkTab='transactions';setView('tickets')"><div class="l">AVAILABLE</div><div class="v">${money(n.avail)}</div></button>`; }
+function desc(t){ return `${t.kind==='flight'?'✈':'✦'} <b>${t.flight}</b> · ${t.market} · <span class="${t.side==='Yes'?'sy':'sn'}">${t.side} ${amer(t.price)}</span>`; }
+function tkRows(list){ return list.map(t=>{ const s=status(t);
+  const row=`<tr class="r" onclick="tkOpen=(tkOpen===${t.id}?null:${t.id});renderTickets()"><td>${hl(t.hole)}<br><span class="st ${s}">${s==='P'?'PENDING':s==='W'?'WON':'LOST'}</span></td><td>${desc(t)}</td><td class="n">${money(t.stake)}</td><td class="n">${money(toWin(t))}</td></tr>`;
+  const x= tkOpen===t.id?`<tr class="x"><td colspan="4">Ticket #${t.id} · ${t.bettor} · ${s==='P'?'Pending':s==='W'?'Won':'Lost'}<br>Risk ${money(t.stake)} / To Win ${money(toWin(t))} (${t.shares.toFixed(1)} sh @ ${pct(t.price)})${s!=='P'?` · P&L <span class="${pnlClass(tkPnl(t))}">${money(tkPnl(t))}</span>`:''}<br>Market: ${t.kind==='flight'?'Flight winner — '+t.flight:'Prop'} · Selection: ${t.market} ${t.side}<br>Accepted: ${t.t} (${hl(t.hole)}) · Rake ${money(t.rake)}${t.note?'<br>Note: '+t.note:''}</td></tr>`:'<tr></tr>';
+  return row+x; }).join(''); }
+function tkTable(list){ const R=list.reduce((a,t)=>a+t.stake,0), W=list.reduce((a,t)=>a+toWin(t),0);
+  return `<div class="card" style="padding:4px"><table class="tk"><thead><tr><th>Accepted</th><th>Description</th><th class="n">Risk</th><th class="n">To Win</th></tr></thead><tbody>${tkRows(list)||'<tr><td colspan=4>No tickets</td></tr>'}</tbody>
+  <tfoot><tr><td colspan="2">Total (${list.length})</td><td class="n">${money(R)}</td><td class="n">${money(W)}</td></tr></tfoot></table></div>`; }
+function renderTickets(){
+  $('#hdr-title').textContent='Tickets';
+  $('#hdr-sub').textContent=priceMode==='final'?'Settled · Won / Lost':priceMode==='live'?'Live thru hole 12 · open risk':'Opening market';
+  const mb=`<div class="pills">${['open','live','final'].map(m=>`<button class="pill ${priceMode===m?'on':''}" onclick="priceMode='${m}';setView('tickets')">${m==='live'?'LIVE (H12)':m.toUpperCase()}</button>`).join('')}</div>`;
+  const sn=`<div class="subnav">${[['figures','Figures'],['pending','Pending'],['transactions','Transactions']].map(([k,l])=>`<button class="${tkTab===k?'on':''}" onclick="tkTab='${k}';figDrill=null;tkOpen=null;renderTickets()">${l}</button>`).join('')}</div>`;
+  const tr=placed(); let body='';
+  if(tkTab==='pending'){
+    const pend=tr.filter(t=>status(t)==='P').reverse();
+    body=`<div class="crumb">Tickets › Pending Wagers</div>`+(pend.length?tkTable(pend):`<div class="card team-meta">No open risk — all tickets settled. See Figures or Transactions for Won/Lost.</div>`);
+  } else if(tkTab==='transactions'){
+    body=`<div class="crumb">Tickets › Transactions</div>`+tkTable([...tr].reverse());
+  } else if(figDrill!==null){
+    body=`<div class="crumb"><a onclick="figDrill=null;renderTickets()">Tickets › Figures</a> › ${hl(figDrill)}</div>`+tkTable(tr.filter(t=>t.hole===figDrill));
+  } else {
+    const rows=HOLES.filter(h=>h<=liveHole()).map(h=>{const l=tr.filter(t=>t.hole===h);
+      const st=l.reduce((a,t)=>a+t.stake,0), rk=l.reduce((a,t)=>a+t.rake,0), pl=l.reduce((a,t)=>a+tkPnl(t),0);
+      return `<tr class="r" onclick="figDrill=${h};renderTickets()"><td>${hl(h)}</td><td class="n">${l.length}</td><td class="n">${money(st)}</td><td class="n" style="color:var(--rake)">${money(rk)}</td><td class="n ${pnlClass(pl)}">${priceMode==='final'?money(pl):'—'}</td></tr><tr></tr>`;}).join('');
+    const T=(f)=>tr.reduce((a,t)=>a+f(t),0);
+    body=`<div class="crumb">Tickets › Figures (tap a window to drill in)</div><div class="card" style="padding:4px"><table class="tk"><thead><tr><th>Window</th><th class="n">Tix</th><th class="n">Handle</th><th class="n">Rake</th><th class="n">Bettor P&L</th></tr></thead><tbody>${rows}</tbody>
+    <tfoot><tr><td>Total</td><td class="n">${tr.length}</td><td class="n">${money(T(t=>t.stake))}</td><td class="n" style="color:var(--rake)">${money(T(t=>t.rake))}</td><td class="n">${priceMode==='final'?money(T(tkPnl)):'—'}</td></tr></tfoot></table></div>
+    <button class="btn btn-no" style="width:100%;margin-top:8px" onclick="setView('settle')">Full settlement & leaderboard</button>`;
+  }
+  $('#view-tickets').innerHTML=mb+sn+body+`<div class="footer-note">MOCK book wallet: $${BANKROLL} bankroll + rake · To Win = payout if side hits ($1/share, after 8% rake) · not real money</div>`;
+}
+
 // Hash routes for deep links / screenshots: #home #flight #flight-SANTA #props #feed #settle
 function routeFromHash(){
   const h = (location.hash||'#home').slice(1);
   if(h==='settle'){ setView('settle'); return; }
   if(h==='props'){ setView('props'); return; }
   if(h==='feed'){ setView('feed'); return; }
+  if(h.startsWith('tickets')){ const p=h.split('-'); tkTab=p[1]||'pending'; if(p[2]) priceMode=p[2]; setView('tickets'); return; }
   if(h==='home' || h===''){ setView('home'); return; }
   if(h.startsWith('flight')){
     const parts = h.split('-');
